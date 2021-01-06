@@ -7,6 +7,10 @@ defmodule MiniRepo.Mirror.Server do
 
   @default_sync_opts [ordered: false]
 
+  def add_package(repo_name, name) do
+    GenServer.call(repo_name, {:add_package, name}, 60000)
+  end
+
   def start_link(options) do
     {mirror, options} = Keyword.pop(options, :mirror)
     GenServer.start_link(__MODULE__, mirror, options)
@@ -19,21 +23,35 @@ defmodule MiniRepo.Mirror.Server do
   end
 
   @impl true
+  def handle_call({:add_package, name}, _from, mirror) do
+    IO.inspect(mirror.only)
+    mirror = Map.update!(mirror, :only, &Enum.uniq([name | &1]))
+    IO.inspect(mirror.only)
+
+    mirror =
+      case sync(mirror) do
+        {:ok, %MiniRepo.Mirror{} = new_mirror} -> new_mirror
+        _ -> mirror
+      end
+
+    {:reply, :ok, mirror}
+  end
+
+  @impl true
   def handle_continue(:sync, mirror) do
     handle_info(:sync, mirror)
   end
 
   @impl true
   def handle_info(:sync, mirror) do
-    case sync(mirror) do
-      {:ok, %MiniRepo.Mirror{} = new_mirror} ->
-        schedule_sync(new_mirror)
-        {:noreply, new_mirror}
+    mirror =
+      case sync(mirror) do
+        {:ok, %MiniRepo.Mirror{} = new_mirror} -> new_mirror
+        _ -> mirror
+      end
 
-      _ ->
-        schedule_sync(mirror)
-        {:noreply, mirror}
-    end
+    schedule_sync(mirror)
+    {:noreply, mirror}
   end
 
   defp schedule_sync(mirror) do
